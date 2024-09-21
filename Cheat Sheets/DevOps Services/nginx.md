@@ -1,0 +1,143 @@
+## Config Syntax
+
+Validate config with [gixy](https://github.com/yandex/gixy) (static
+config analyzer)
+
+### Proxy Pass + Rewrite
+
+For example strip a path before proxy passing...
+
+    location ~ <expr> {
+       rewrite /<path to strip>/(.*) /$1 break;
+       proxy_pass http://127.0.0.1:8080;
+    }
+
+### Proxy Pass + Host Header
+
+By default proxy pass doesn't pass the header. This needs to be said
+explicitly:
+
+    location / {
+        proxy_pass       http://localhost:8000;
+        proxy_set_header Host $host;
+    }
+
+### SNI VirtualHosts
+
+Works using [ssl_preread module](http://nginx.org/en/docs/stream/ngx_stream_ssl_preread_module.html)
+
+    map $ssl_preread_server_name $name {
+        backend.example.com      backend;
+        default                  backend2;
+    }
+
+    upstream backend {
+       [...]
+    }
+
+    upstream backend2 {
+       [...]
+    }
+
+    server {
+        listen      <port>;
+        proxy_pass  $name;
+        ssl_preread on;
+    }
+
+### Complex Conditions
+
+As nginx does not support complex logic in if() conditions you need to
+set flags in a smart way to workaround it.
+
+    # Define a control flag
+    set $extra_handling 0;
+
+    # Set the control flag when needed
+    if ( $variable1 ~* pattern) {
+        set $extra_handling 1;
+    }
+
+    # Unset the flag if needed
+    if ( $variable2 = 1 ) {
+        set $extra_handling 0;
+    }
+
+    if ( $extra_handling = 1 ) {
+        # Trigger intended behaviour
+    }
+
+## Mitigating security issues
+
+A general description on secure nginx configuration can be found here:
+[https://raymii.org/s/tutorials/Strong\_SSL\_Security\_On\_nginx.html](https://raymii.org/s/tutorials/Strong_SSL_Security_On_nginx.html)
+
+### BEAST
+
+    ssl_ciphers RC4:HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+### DH downgrade
+
+Create unique DH group
+
+    openssl dhparam -out dhparams.pem 2048
+
+Enable it in config
+
+    ssl_dhparam {path to dhparams.pem}
+
+## Data Privacy
+
+Alternatives to avoid tracking users by IP to be more GDPR compliant: 
+
+- [Mask IP Addresses](https://www.nginx.com/blog/data-masking-user-privacy-nginscript/), deterministically replace IPs with same but anonymous value using JS plugin
+- [Match all but the last octect of $remote_addr with regex](https://stackoverflow.com/questions/6477239/anonymize-ip-logging-in-nginx) and insert variable in custom log_format 
+
+      # Note: add another/extend regex for IPv6
+      if ($remote_addr ~ (\d+).(\d+).(\d+).(\d+)) {
+         set $truncated_ip $1.$2.0.1;
+      }
+      log_format  main  '[$time_local] $truncated_ip "$request" $status $body_bytes_sent $request_time "$http_referer" "$http_user_agent"';
+      
+- Starting with nginx 1.11 [use "map" to apply regex patterns and extract the result](https://stackoverflow.com/questions/6477239/anonymize-ip-logging-in-nginx)
+
+      map $remote_addr $truncated_ip {
+         ~(?P<ip>\d+\.\d+\.\d+)\.    $ip.0;
+         ~(?P<ip>[^:]+:[^:]+):       $ip::;
+         default                     0.0.0.0;
+      }
+      log_format  main  '[$time_local] $truncated_ip "$request" $status $body_bytes_sent $request_time "$http_referer" "$http_user_agent"';
+      
+## Enabling Features
+
+### FPC with memcached
+
+Full Page Cache (FPC) with memcached
+
+    if ($request_method = GET) {
+        set $memcached_key some_prefix$request_uri;
+        memcached_pass memcached;
+        error_page 404 = @nocache;
+    }
+
+### FastCGI caching
+
+    set $nocache "";
+    if ($http_cookie ~ SESS) {
+        set $nocache "Y";
+    }
+    fastcgi_cache mycache;
+    fastcgi_cache_key $scheme$host$uri$args;
+    fastcgi_ignore_headers Expires;
+    fastcgi_cache_bypass $nocache;
+    fastcgi_no_cache $nocache;
+
+### OSCP Stapling
+
+Available starting with nginx 1.3.7
+
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver_timeout 5s;
