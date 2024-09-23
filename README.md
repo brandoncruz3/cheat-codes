@@ -1,2 +1,3 @@
 # cheat-codes
- Collection of DevOps Cheat Codes
+
+Collection of DevOps Cheat Codes & Examples
