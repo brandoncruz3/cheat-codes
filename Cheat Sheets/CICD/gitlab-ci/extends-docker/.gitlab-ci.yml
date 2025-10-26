@@ -1,0 +1,10 @@
+include: '/templates/jobs.yml' 
+
+stages: 
+  - push-image
+
+push: 
+  stage: push-image
+  extends: .docker
+  script:
+    - docker buildx build --platform "linux/amd64,linux/arm64" -f Dockerfile -t user/myimage:tag --push .
